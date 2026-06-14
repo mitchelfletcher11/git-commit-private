@@ -27,27 +27,40 @@ In short: if Claude changed a skill file, this skill runs. If an automated sweep
 
 ---
 
-## Step 0 — Preflight: detect the dotfiles repo (first run)
+## Step 0 — Preflight: build the private git environment (first run)
 
-This skill needs three things to push: `~/.claude` must be a git repo, it must have an `origin`
-remote, and (if the remote uses token auth over HTTPS) a `~/.claude/github-token` file holding a
-Personal Access Token. Detect all three; set up only what's missing, prompting first.
+This skill pushes `~/.claude` to a **private** GitHub repo. It works even if the user has
+**never used GitHub before** — detect what's missing and build it, prompting at each step.
+Never assume an account, repo, or tool already exists.
 
 ```bash
+command -v git >/dev/null 2>&1 && echo "GIT_OK" || echo "NO_GIT"
+command -v gh  >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 && echo "GH_READY" || echo "GH_ABSENT"
 git -C ~/.claude rev-parse --is-inside-work-tree >/dev/null 2>&1 && echo "REPO_OK" || echo "NO_REPO"
 git -C ~/.claude remote get-url origin 2>/dev/null || echo "NO_REMOTE"
 [ -f ~/.claude/github-token ] && echo "TOKEN_OK" || echo "NO_TOKEN"
 ```
 
-- **`NO_REPO`** → offer: *"`~/.claude` isn't a git repo yet. Initialise it and point it at your private dotfiles repo? (I'll run `git init` and add your remote.)"* On yes: `git -C ~/.claude init -b main`, then ask for **their** private repo URL and `git -C ~/.claude remote add origin <url>`.
-- **`NO_REMOTE`** → ask for their private dotfiles repo URL and add it as `origin`. Never assume an account or repo name.
-- **`NO_TOKEN`** → the push authenticates with a token file. **Prompt the user to paste a GitHub Personal Access Token** (scope: `repo`), then write it with safe perms — never inline a value into the skill or commit it:
-  ```bash
-  printf '%s' "<token the user pasted>" > ~/.claude/github-token && chmod 600 ~/.claude/github-token
-  ```
-  Confirm `~/.claude/github-token` is gitignored. If the remote uses SSH or a credential helper instead, skip the token entirely and push with plain `git push`.
+Resolve in this order — each step assumes the ones above it are done:
 
-If all three return OK, continue silently.
+1. **`NO_GIT`** → git isn't installed; nothing works without it. Give the one install command for their platform (`brew install git`, `sudo apt install git`, …) and stop until it's present.
+2. **A GitHub account** → if the user says they've never used GitHub, point them to <https://github.com/signup> to create a free account before continuing. A private repo and any token both require it.
+3. **`NO_REPO`** → offer: *"`~/.claude` isn't a git repo yet — I'll initialise it."* On yes: `git -C ~/.claude init -b main`.
+4. **`NO_REMOTE` — does the private repo exist yet?** Ask. Then:
+   - **It exists** → ask for its URL and `git -C ~/.claude remote add origin <url>`.
+   - **It does NOT exist** (the common first-time case) → **create it.** The gentlest path is the `gh` CLI:
+     - **`GH_READY`** → `gh repo create <name> --private --source ~/.claude --remote origin` (creates the private repo *and* wires the remote in one step; pick any `<name>`, e.g. `dotfiles` or `claude-config`).
+     - **`GH_ABSENT`** → either install + authenticate `gh` (`gh auth login` walks a first-timer through it in the browser), **or** guide them to create it on the web: <https://github.com/new> → name it, set **Private**, do **not** add a README, Create — then `git -C ~/.claude remote add origin <url>`.
+5. **`NO_TOKEN`** → the push needs credentials. Offer the **easy path first**: if `gh` is authenticated (`GH_READY`), git can use it directly — run `gh auth setup-git` and skip the token file entirely. Otherwise authenticate with a **Personal Access Token**:
+   - Create one at <https://github.com/settings/tokens> → *Generate new token* → scope **`repo`** → copy it (GitHub shows it once).
+   - **Prompt the user to paste it**, then write it with safe perms — never inline a value into the skill or commit it:
+     ```bash
+     printf '%s' "<token the user pasted>" > ~/.claude/github-token && chmod 600 ~/.claude/github-token
+     ```
+   - Ensure it can never be committed: `grep -qxF 'github-token' ~/.claude/.gitignore 2>/dev/null || echo 'github-token' >> ~/.claude/.gitignore`.
+   - If the remote uses SSH instead, skip the token entirely and push with plain `git push`.
+
+If every check returns OK, continue silently.
 
 ---
 

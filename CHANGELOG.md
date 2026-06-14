@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.0 — 2026-06-14
+Zero-state cold-start preflight: detects git, GitHub account, repo existence and token; **creates** the private repo (gh or web) instead of assuming a URL. Account-agnostic push derived from the origin remote.
+
 ## v1.0.0 — 2026-06-14
 Initial public release.
 
